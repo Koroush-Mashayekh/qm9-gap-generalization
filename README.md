@@ -28,8 +28,10 @@ drug and materials discovery, however, predictions are needed for **new chemotyp
 ![Test MAE by representation and split](figures/fig1_representations.png)
 
 ## Protocol
-* **Data:** QM9 (Ramakrishnan *et al.*, *Sci. Data* 2014), 133,885 molecules; the gap is converted from Hartree to eV.
-  Molecules that RDKit cannot sanitize or reads as radicals are excluded and reported (126,559 kept).
+* **Data:** QM9 (Ramakrishnan *et al.*, *Sci. Data* 2014), 133,885 molecules, in the SDF + CSV version distributed by
+  DeepChem for MoleculeNet (Wu *et al.*, *Chem. Sci.* 2018); downloaded by `scripts/00_download_data.py`. The gap is
+  converted from Hartree to eV. Molecules that RDKit cannot sanitize or reads as radicals are excluded and reported
+  (126,559 kept).
 * **Splits:** 80/10/10 train/validation/test, **random** and **balanced scaffold** (Bemis–Murcko), each with 3 seeds.
   All experiments use the same saved splits.
 * **Model selection:** seven candidates (Ridge, kNN, Random Forest, Extra Trees, LightGBM, XGBoost, MLP), each with
@@ -49,6 +51,7 @@ src/qm9gap/
     models.py      the seven candidate models and their search spaces
     evaluate.py    metrics and summaries
 scripts/
+    00_download_data.py           downloads QM9 (MoleculeNet/DeepChem SDF + CSV)
     01_prepare_data.py            QM9 -> molecules, descriptors, fingerprints (resumable)
     02_make_splits.py             fixed splits for all experiments
     03_select_model.py            model selection on the validation set
@@ -62,8 +65,9 @@ figures/                          the figures shown in this README
 ```
 
 ## How to run (Google Colab)
-1. Put `qm9.sdf` and `qm9.sdf.csv` in `MyDrive/QM9_Molecular_Property_Prediction/data/raw/`
-   (or set `QM9_RAW_DIR`).
+1. Run `scripts/00_download_data.py` (first cell of the notebook). It downloads
+   `https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/gdb9.tar.gz` and saves `qm9.sdf` and `qm9.sdf.csv` in
+   `MyDrive/QM9_Molecular_Property_Prediction/data/raw/` (or in `QM9_RAW_DIR`).
 2. Upload this repository to `MyDrive/qm9-gap-generalization/` and open `notebooks/run_on_colab.ipynb` in Colab.
 3. Run the cells in order (several hours in total on a standard Colab runtime; every step is resumable).
    Outputs go to `MyDrive/QM9_Molecular_Property_Prediction/v2/` (or set `QM9_WORK_DIR`), outside the code folder.
@@ -100,8 +104,9 @@ The kept molecules contain 14,505 different scaffolds; 13,594 molecules are acyc
 
 All QM9 molecules are neutral closed-shell species, yet 5,638 records (4.2%) are read by RDKit with unpaired
 electrons. Their molecular graph, and therefore every descriptor computed from it, does not describe the real
-molecule, so they were excluded (listed in `excluded_radicals.csv`). The likely cause is that this SDF does not
-encode all bond orders or charges. Of the 217 descriptors, 27 are constant and were removed; the remaining 190 have
+molecule, so they were excluded (listed in `excluded_radicals.csv`). The likely cause is that this SDF, which was
+generated from the original XYZ coordinates, does not encode all bond orders or charges; DeepChem has since reported
+bond and charge errors in this file and published a corrected version. Of the 217 descriptors, 27 are constant and were removed; the remaining 190 have
 no missing values.
 
 **Output** (`processed/`): `molecules.parquet` (mol_id, SMILES, scaffold, heavy atoms, gap in eV),
@@ -436,11 +441,14 @@ What the pilot showed:
   the seed-to-seed spread measured later (0.008 eV) supports this choice.
 * **Composition of the scaffold test sets:** the balanced scaffold split places all acyclic molecules in training,
   so per-class comparisons (Step 7) are more reliable than the overall difference between the splits.
-* **5,638 records were excluded** because RDKit reads them as radicals; the cause (incomplete bond orders or charges
-  in this SDF) was inferred, not verified against the original QM9 geometries.
+* **5,638 records were excluded** because RDKit reads them as radicals. This matches the bond and charge errors that
+  DeepChem later reported in this SDF, but it was not verified molecule by molecule; the excluded molecules may be
+  of a particular kind (e.g. zwitterionic structures), which slightly narrows the chemical space studied.
 
 ## Future work
 * **Graph neural networks** (e.g. Chemprop) or **3D-aware models** (e.g. SchNet), to test whether learned
   representations reduce the penalty on new scaffolds, in particular for aromatic and strained ring systems.
 * **Uncertainty estimates** (model ensembles, conformal prediction) as a stronger warning signal than similarity.
+* **Recover the excluded molecules** from the corrected DeepChem SDF or from the SMILES stored in the original QM9
+  XYZ files, instead of perceiving bonds from coordinates.
 * **Larger and more drug-like datasets** to test whether the scaffold penalty grows with chemical diversity.

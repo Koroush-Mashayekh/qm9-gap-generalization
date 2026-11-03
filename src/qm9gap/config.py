@@ -1,6 +1,9 @@
 """All settings of the project in one place.
 
-Paths can be changed without touching code through two environment variables:
+Where the data and results go:
+  * on Google Colab (Drive mounted): MyDrive/QM9_Molecular_Property_Prediction/data/raw and .../v2
+  * on any other computer: data/raw and outputs/ inside this repository
+Both can be changed with two environment variables:
     QM9_RAW_DIR   folder with qm9.sdf and qm9.sdf.csv
     QM9_WORK_DIR  folder where this project writes processed data and results
 """
@@ -8,9 +11,14 @@ import os
 from pathlib import Path
 
 # ---------------- paths ----------------
+_REPO = Path(__file__).resolve().parents[2]
 _DRIVE = Path("/content/drive/MyDrive/QM9_Molecular_Property_Prediction")
-RAW_DIR = Path(os.environ.get("QM9_RAW_DIR", _DRIVE / "data/raw"))
-WORK_DIR = Path(os.environ.get("QM9_WORK_DIR", _DRIVE / "v2"))
+if _DRIVE.parent.is_dir():  # running on Colab with Google Drive mounted
+    _RAW_DEFAULT, _WORK_DEFAULT = _DRIVE / "data/raw", _DRIVE / "v2"
+else:
+    _RAW_DEFAULT, _WORK_DEFAULT = _REPO / "data/raw", _REPO / "outputs"
+RAW_DIR = Path(os.environ.get("QM9_RAW_DIR", _RAW_DEFAULT))
+WORK_DIR = Path(os.environ.get("QM9_WORK_DIR", _WORK_DEFAULT))
 
 SDF = RAW_DIR / "qm9.sdf"
 PROPERTIES_CSV = RAW_DIR / "qm9.sdf.csv"

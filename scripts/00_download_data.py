@@ -7,6 +7,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
+# let Python find our own code in src/qm9gap (the project is not installed as a package)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from qm9gap import config
 
@@ -22,7 +23,7 @@ else:
     urllib.request.urlretrieve(URL, archive)
 
     with tarfile.open(archive) as tar:
-        tar.extractall(raw_dir)
+        tar.extractall(raw_dir, filter="data")  # "data" = only plain files, nothing outside raw_dir
 
     (raw_dir / "gdb9.sdf").rename(config.SDF)
     (raw_dir / "gdb9.sdf.csv").rename(config.PROPERTIES_CSV)

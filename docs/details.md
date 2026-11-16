@@ -345,6 +345,23 @@ typical, so Step 6's similarity would not have flagged them.
 `chemistry_worst_molecules.csv`, figures `fig4_shap_importance.png`, `fig5_error_by_chemistry.png`,
 `fig6_worst_molecules.png`.
 
+## Step 8 — Predicting new molecules (`scripts/08_predict.py`)
+
+**Goal:** use the result of the study as a tool: give a SMILES, get the predicted HOMO–LUMO gap.
+
+* **Final model:** the model and settings selected in Step 3 (LightGBM) on the best representation of Step 4
+  (descriptors + Morgan), trained once on **all 126,559 molecules**. The number of trees is the average number that
+  early stopping chose in the Step-4 runs of this representation, since no validation set is left for early stopping.
+  The model is saved in `results/final_model/` and reused by later runs.
+* **Same features as in training:** a new molecule is read from its SMILES and turned into the same 190 descriptors
+  and Morgan counts, with the same functions (`src/qm9gap/chem.py`) and in the same column order.
+* **Reliability:** for every molecule the script reports the Tanimoto similarity to the most similar training molecule
+  (as in Step 6) with that molecule's DFT gap, and warns when the molecule is outside what QM9 covers (elements other
+  than C, N, O, F; more than 9 heavy atoms; charged; radical). Step 6 showed that the typical error is about
+  0.12–0.15 eV above similarity 0.6 and about 0.25 eV or more below 0.4.
+* **Limits:** the expected accuracy for a genuinely new molecule is the scaffold-split result (≈ 0.175 eV), not the
+  random-split one. A molecule that is itself in QM9 was part of the training set, so its prediction is not a test.
+
 ## Pilot study
 Before this protocol, a first pass with default hyperparameters and a single 80/20 split (no validation set) showed
 that the test error roughly doubles for molecules with unseen scaffolds, that the ranking of the models changes between

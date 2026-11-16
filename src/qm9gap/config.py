@@ -105,7 +105,14 @@ CHEM_GAP_BINS = (0.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 20.0)   # eV, for systematic
 CHEM_N_WORST = 20                                          # molecules drawn in the "worst predictions" figure
 CHEM_DIR = RESULTS_DIR / "chemistry"
 
+# ---------------- final model for new molecules (step 8) ----------------
+# LightGBM with the step-3 settings on the best representation of step 4, trained on all molecules.
+FINAL_REPRESENTATION = "combined"
+FINAL_DIR = RESULTS_DIR / "final_model"
+FINAL_MODEL = FINAL_DIR / "lightgbm_combined_all_molecules.joblib"
+
 
 def make_dirs():
-    for d in [PROC_DIR, CHUNK_DIR, RESULTS_DIR, RUNS_DIR, FIG_DIR, SELECTION_DIR, LC_DIR, AD_DIR, CHEM_DIR]:
+    for d in [PROC_DIR, CHUNK_DIR, RESULTS_DIR, RUNS_DIR, FIG_DIR, SELECTION_DIR, LC_DIR, AD_DIR, CHEM_DIR,
+              FINAL_DIR]:
         d.mkdir(parents=True, exist_ok=True)

@@ -124,3 +124,22 @@ def mol_from_smiles(smiles):
     if mol is None:
         raise ValueError(f"Invalid SMILES: {smiles}")
     return mol
+
+
+def outside_qm9(mol):
+    """Reasons why a molecule is unlike the QM9 molecules (empty list = it looks like QM9).
+
+    QM9 has only neutral, closed-shell molecules with at most 9 heavy atoms of C, N, O and F,
+    so predictions for anything else are extrapolations and much less reliable.
+    """
+    reasons = []
+    other = sorted({atom.GetSymbol() for atom in mol.GetAtoms()} - {"C", "N", "O", "F", "H"})
+    if other:
+        reasons.append("elements not in QM9: " + ", ".join(other))
+    if mol.GetNumHeavyAtoms() > 9:
+        reasons.append(f"{mol.GetNumHeavyAtoms()} heavy atoms (QM9: at most 9)")
+    if Chem.GetFormalCharge(mol) != 0:
+        reasons.append("charged (QM9: neutral only)")
+    if any(atom.GetNumRadicalElectrons() for atom in mol.GetAtoms()):
+        reasons.append("radical (QM9: closed-shell only)")
+    return reasons

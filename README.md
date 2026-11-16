@@ -80,6 +80,16 @@ environment variables `QM9_RAW_DIR` and `QM9_WORK_DIR`.
 step 4 ≈ 3 h, step 5 ≈ 1.5 h, step 6 ≈ 15 min, step 7 ≈ 15 min. Every step saves its progress, so an interrupted run
 continues where it stopped.
 
+### Predict the gap of a new molecule
+After steps 1–4, give one or more SMILES (or a text file with one SMILES per line):
+```bash
+python scripts/08_predict.py "c1ccccc1O" "CC(=O)C"
+```
+The first run trains the final model (LightGBM on descriptors + Morgan, all 126,559 molecules, about 15 min) and
+saves it; later runs only predict. For every molecule the script also prints its similarity to the most similar QM9
+molecule (with that molecule's DFT gap) and a warning if the molecule is unlike QM9 (other elements than C, N, O, F,
+more than 9 heavy atoms, charged or radical), because such predictions are much less reliable.
+
 **Note:** result tables and predictions are created when the scripts run and are not stored in this repository; the
 figures are in `figures/`, and the notebook shows the printed output of the final run.
 
@@ -94,6 +104,7 @@ scripts/                          run in this order
     05_learning_curves.py         test error vs. training-set size
     06_applicability_domain.py    error vs. similarity to the training set
     07_chemical_analysis.py       SHAP, error by chemical class, worst predictions
+    08_predict.py                 predict the gap of new molecules from SMILES
 src/qm9gap/                       shared code used by the scripts
     config.py                     all paths and settings
     chem.py                       RDKit functions (reading molecules, descriptors, fingerprints, scaffolds)

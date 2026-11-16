@@ -14,6 +14,7 @@
 
 import json
 import sys
+import warnings
 from pathlib import Path
 
 import joblib
@@ -25,6 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from qm9gap import chem, config
 from qm9gap.features import load_molecules, load_representation
 from qm9gap.models import build
+
+# harmless message of newer LightGBM + scikit-learn versions; it does not change the predictions
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 
 def train_final_model():

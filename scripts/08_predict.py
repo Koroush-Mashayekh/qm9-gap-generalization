@@ -6,7 +6,7 @@
 #
 # The first run trains the final model and saves it (about 15 min on Colab): LightGBM with the
 # settings chosen in step 3, on RDKit descriptors + Morgan fingerprints (the best representation in
-# step 4), trained on all 126,559 molecules. Later runs only load the saved model and predict.
+# step 4), trained on all molecules of step 1. Later runs only load the saved model and predict.
 #
 # For every molecule the script also reports its similarity to the most similar training molecule
 # (as in step 6) and warns when the molecule is unlike QM9, because the prediction is then much

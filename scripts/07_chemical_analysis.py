@@ -135,7 +135,10 @@ def structural_table(mols, force):
     from qm9gap import chem
     path = config.CHEM_DIR / "structural_classes.parquet"
     if path.is_file() and not force:
-        return pd.read_parquet(path)
+        table = pd.read_parquet(path)
+        if set(chem.STRUCTURAL_CLASSES) <= set(table.columns):  # cache is up to date
+            return table
+        print("  new structural classes added: recomputing the class table")
     rows = [chem.structural_classes(s) for s in mols["smiles"]]
     table = pd.DataFrame(rows, columns=list(chem.STRUCTURAL_CLASSES))
     table.insert(0, "mol_id", mols["mol_id"].to_numpy())
@@ -189,7 +192,8 @@ def plot_chemistry(by_class, by_gap, path):
     for k, s in enumerate(["random", "scaffold"]):
         if f"MAE_mean_{s}" in t:
             ax.barh(y + (k - 0.5) * h, t[f"MAE_mean_{s}"], h * 0.95, color=SPLIT_COLORS[s], label=f"{s} split")
-    labels = [f"{c}  ({100 * sh:.0f}%)" for c, sh in zip(t["class"], t["share_scaffold"])]
+    labels = [f"{c}  ({100 * sh:.0f}%)" if sh >= 0.01 else f"{c}  ({100 * sh:.1f}%)"
+              for c, sh in zip(t["class"], t["share_scaffold"])]
     ax.set_yticks(y, labels)
     overall = by_class.loc[by_class["class"] == "all molecules", "MAE_mean_scaffold"].iloc[0]
     ax.axvline(overall, color="0.3", ls="--", lw=1, label="all molecules, scaffold split")

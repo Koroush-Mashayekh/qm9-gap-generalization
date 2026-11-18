@@ -178,8 +178,12 @@ def main(reps, split_types, seeds, force):
     table = summary.assign(MAE=[f"{m:.3f} ± {s:.3f}" if np.isfinite(s) else f"{m:.3f}"
                                 for m, s in zip(summary.MAE_mean, summary.MAE_std)])
     print("\nTest MAE (eV) by training-set size:")
-    print(table.pivot_table(index="n_train", columns=["split_type", "representation"], values="MAE",
-                            aggfunc="first").to_string())
+    # one row per nominal size; the full training set differs by one molecule between the split types
+    table["training set"] = [f"{int(p):,}" if p != "full" else "full (~104,665)" for p in table["point"]]
+    order = sorted(table["training set"].unique(), key=lambda s: float("inf") if s.startswith("full")
+                   else int(s.replace(",", "")))
+    print(table.pivot_table(index="training set", columns=["split_type", "representation"], values="MAE",
+                            aggfunc="first").reindex(order).to_string())
     print("\nPower-law fit  MAE = a * n^(-b):")
     print(slopes.to_string(index=False))
 

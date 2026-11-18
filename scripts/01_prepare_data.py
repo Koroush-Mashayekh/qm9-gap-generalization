@@ -1,15 +1,17 @@
 # Step 1: read QM9 once and save everything the later steps need.
 #
-# For every molecule in the SDF: SMILES, Bemis-Murcko scaffold, RDKit 2D descriptors and a Morgan
-# count fingerprint. Molecules that RDKit cannot read, or reads as radicals, are removed.
+# Every molecule is read from its GDB-17 SMILES, so all bonds are known exactly (no guessing from 3D
+# coordinates). The 3,054 "uncharacterized" molecules, whose structure changed during the DFT
+# optimization, are excluded. For every other molecule: canonical SMILES, Bemis-Murcko scaffold,
+# RDKit 2D descriptors and a Morgan count fingerprint.
 #
 # Outputs in processed/:
 #   molecules.parquet     mol_id, smiles, scaffold, n_heavy, gap_eV
 #   descriptors.parquet   mol_id + RDKit descriptors (constant ones removed)
 #   morgan_counts.npy     Morgan fingerprints, same row order as molecules.parquet
-#   excluded_radicals.csv and prepare_report.json
+#   prepare_report.json   counts of what was read, excluded and kept
 #
-# The SDF is processed in chunks of 10,000 records and every chunk is saved. If Colab disconnects,
+# The molecules are processed in chunks of 10,000 and every chunk is saved. If Colab disconnects,
 # run the script again and it continues where it stopped (about 20 min in total).
 # To recompute everything, delete the folder processed/chunks.
 
@@ -29,29 +31,28 @@ CHUNK = 10_000
 TARGET = config.TARGET  # "gap_eV"
 
 
-def read_chunk(supplier, start, stop):
-    """Read SDF records start..stop-1.
+def read_chunk(chunk):
+    """Featurize the molecules of one chunk of the QM9 table.
 
-    Returns a table (one row per molecule), the Morgan fingerprints (one row per molecule)
-    and the ids of the records that RDKit could not read.
+    Returns a table (one row per usable molecule), the Morgan fingerprints (one row per molecule)
+    and a dict {mol_id: problem} for the molecules that could not be used.
     """
-    rows, morgan, failed = [], [], []
-    for i in range(start, stop):
-        raw = supplier[i]
-        if raw is not None and raw.HasProp("_Name"):
-            mol_id = chem.clean_id(raw.GetProp("_Name"))
-        else:
-            mol_id = f"record_{i}"
-
-        mol = chem.prepare_mol(raw)  # sanitize + remove H; None if RDKit rejects it
-        if mol is None:
-            failed.append(mol_id)
+    rows, morgan, problems = [], [], {}
+    for mol_id, smiles, gap in zip(chunk["mol_id"], chunk["smiles_gdb17"], chunk[TARGET]):
+        try:
+            mol = chem.mol_from_smiles(smiles)
+            problem = chem.structure_problem(mol)   # "" when the molecule is fine
+        except ValueError:
+            problem = "rejected by RDKit"
+        if problem:
+            problems[mol_id] = problem
             continue
 
         row = {"mol_id": mol_id,
                "smiles": chem.smiles_of(mol),
                "scaffold": chem.scaffold_of(mol),
-               "n_heavy": mol.GetNumHeavyAtoms()}
+               "n_heavy": mol.GetNumHeavyAtoms(),
+               TARGET: gap}
         # add the 217 RDKit descriptors as extra columns: {"MolWt": 18.0, "TPSA": 25.3, ...}
         row.update(zip(chem.DESCRIPTOR_NAMES, chem.descriptors_of(mol)))
         rows.append(row)
@@ -59,55 +60,43 @@ def read_chunk(supplier, start, stop):
 
     # one row of 2,048 counts per molecule (reshape also gives the right shape if the chunk is empty)
     morgan = np.array(morgan, dtype=np.uint8).reshape(-1, config.MORGAN_SIZE)
-    return pd.DataFrame(rows), morgan, failed
+    return pd.DataFrame(rows), morgan, problems
 
 
 config.make_dirs()
-supplier = chem.open_sdf()
-n_records = len(supplier)
-print(f"SDF records: {n_records:,}")
 
-# 1. read the SDF in chunks (chunks that are already saved are skipped)
+# 1. the QM9 table made by step 0; the gap goes from Hartree to eV
+qm9 = pd.read_csv(config.QM9_TABLE)
+qm9[TARGET] = qm9["gap"] * config.HARTREE_TO_EV
+print(f"QM9 molecules: {len(qm9):,}")
+
+# 2. remove the uncharacterized molecules (first column of the list = index of the molecule)
+lines = config.UNCHARACTERIZED.read_text().split("\n")[9:-2]   # skip the header and the footer
+uncharacterized = {int(line.split()[0]) for line in lines if line.strip()}
+is_uncharacterized = qm9["index"].isin(uncharacterized)
+if config.EXCLUDE_UNCHARACTERIZED:
+    qm9 = qm9[~is_uncharacterized].reset_index(drop=True)
+print(f"Uncharacterized molecules excluded: {int(is_uncharacterized.sum()):,}")
+
+# 3. featurize in chunks (chunks that are already saved are skipped)
 t0 = time.time()
 chunk_files = []
-for start in range(0, n_records, CHUNK):
-    stop = min(start + CHUNK, n_records)
+for start in range(0, len(qm9), CHUNK):
     path = config.CHUNK_DIR / f"chunk_{start:06d}.pkl"
     chunk_files.append(path)
     if not path.exists():
-        pd.to_pickle(read_chunk(supplier, start, stop), path)
-        print(f"records {start:>7,}-{stop:>7,} done | {(time.time() - t0) / 60:5.1f} min")
+        pd.to_pickle(read_chunk(qm9.iloc[start:start + CHUNK]), path)
+        print(f"molecules {start:>7,}-{min(start + CHUNK, len(qm9)):>7,} done | {(time.time() - t0) / 60:5.1f} min")
 
-# 2. join the chunks
-tables, morgans, failed = [], [], []
+# 4. join the chunks
+tables, morgans, problems = [], [], {}
 for path in chunk_files:
-    chunk_table, chunk_morgan, chunk_failed = pd.read_pickle(path)
+    chunk_table, chunk_morgan, chunk_problems = pd.read_pickle(path)
     tables.append(chunk_table)
     morgans.append(chunk_morgan)
-    failed += chunk_failed
+    problems.update(chunk_problems)
 table = pd.concat(tables, ignore_index=True)  # all chunks as one table
 morgan = np.vstack(morgans)                     # all fingerprints as one array
-
-# 3. add the target: HOMO-LUMO gap, Hartree -> eV
-props = pd.read_csv(config.PROPERTIES_CSV, usecols=["mol_id", "gap"])
-props["mol_id"] = props["mol_id"].map(chem.clean_id)
-props[TARGET] = props["gap"] * config.HARTREE_TO_EV
-table = table.merge(props[["mol_id", TARGET]], on="mol_id", how="left", validate="one_to_one")
-has_target = table[TARGET].notna()
-
-# 4. radicals: QM9 molecules are closed-shell, so unpaired electrons mean a wrong graph in the SDF
-table["radical_electrons"] = [chem.count_radical_electrons(s) for s in table["smiles"]]
-is_radical = table["radical_electrons"] != 0
-radicals = table.loc[is_radical & has_target, ["mol_id", "smiles", "radical_electrons", TARGET]]
-radicals.to_csv(config.PROC_DIR / "excluded_radicals.csv", index=False)
-
-# keep molecules that have a gap and are not radicals (~ means "not")
-if config.EXCLUDE_RADICALS:
-    keep = has_target & ~is_radical
-else:
-    keep = has_target
-table = table[keep].reset_index(drop=True)
-morgan = morgan[keep.to_numpy()]  # same rows as the table
 
 # 5. descriptors: drop the ones that have the same value for every molecule (no target used)
 desc = table[chem.DESCRIPTOR_NAMES].astype(np.float32)
@@ -116,17 +105,15 @@ desc = desc.drop(columns=constant)
 desc.insert(0, "mol_id", table["mol_id"])
 
 # 6. save
-molecules = table[["mol_id", "smiles", "scaffold", "n_heavy", TARGET, "radical_electrons"]]
+molecules = table[["mol_id", "smiles", "scaffold", "n_heavy", TARGET]]
 molecules.to_parquet(config.MOLECULES, index=False)
 desc.to_parquet(config.DESCRIPTORS, index=False)
 np.save(config.MORGAN, morgan)
 
 report = {
-    "sdf_records": n_records,
-    "rejected_by_rdkit": len(failed),
-    "without_target": int((~has_target).sum()),
-    "radicals_found": len(radicals),
-    "radicals_excluded": len(radicals) if config.EXCLUDE_RADICALS else 0,
+    "qm9_molecules": int(len(is_uncharacterized)),
+    "uncharacterized_excluded": int(is_uncharacterized.sum()) if config.EXCLUDE_UNCHARACTERIZED else 0,
+    "structure_problems": len(problems),
     "molecules_kept": len(molecules),
     "descriptors_computed": len(chem.DESCRIPTOR_NAMES),
     "constant_descriptors_removed": len(constant),
@@ -138,6 +125,7 @@ report = {
     "gap_eV_mean": round(float(molecules[TARGET].mean()), 4),
     "gap_eV_std": round(float(molecules[TARGET].std()), 4),
 }
-full_report = {**report, "constant_descriptors": constant, "rejected_ids": failed}
+full_report = {**report, "constant_descriptors": constant, "problem_molecules": problems}
 config.PREP_REPORT.write_text(json.dumps(full_report, indent=2))
-print(pd.Series(report).to_string())
+for key, value in report.items():
+    print(f"{key:32s} {value:,}" if isinstance(value, int) else f"{key:32s} {value}")

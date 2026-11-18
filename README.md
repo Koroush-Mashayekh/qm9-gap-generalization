@@ -25,33 +25,37 @@ much accuracy is lost in that case, using the HOMO–LUMO gap of the QM9 dataset
 
 ## Key results
 * **Best representation: RDKit descriptors + Morgan fingerprints** (called `combined` in the code), with LightGBM
-  chosen by a validation-only protocol. Test MAE **0.128 ± 0.001 eV** on the random split and **0.175 ± 0.008 eV** on
-  the scaffold split (R² 0.98 / 0.97), 6–8× better than predicting the mean gap.
-* **The scaffold penalty is about 0.045 eV (+25–37%) for every representation**, and more training data closes it only
+  chosen by a validation-only protocol. Test MAE **0.122 ± 0.001 eV** on the random split and **0.181 ± 0.011 eV** on
+  the scaffold split (R² 0.98 / 0.96), 6–9× better than predicting the mean gap.
+* **The scaffold penalty is about 0.06 eV (+36–48%) for every representation**, and more training data closes it only
   slowly: on the scaffold split the error falls about one third more slowly as the training set grows.
-* **Similarity to the training set explains only about one third of the penalty** and is a weak warning signal for
-  single molecules (Spearman ρ ≈ −0.1).
+* **Similarity to the training set explains only about a quarter of the penalty** and is a weak warning signal for
+  single molecules (Spearman ρ ≈ −0.07).
 * **The model has learned sensible chemistry** (saturation raises the gap; unsaturation, aromaticity and carbonyl
-  groups lower it) but fails most on **new aromatic ring systems**, on very small and very large gaps (predictions
-  shrink towards the mean), and on **strained polycyclic molecules** whose electronic structure depends on 3D geometry.
+  groups lower it) but fails most on **charge-separated molecules**, on **strained cages of fused cyclopropanes**
+  (over-predicted by about 1 eV), and on very small and very large gaps (predictions shrink towards the mean).
+* **Data quality matters:** reading QM9 from the official GDB-17 SMILES instead of a common SDF version recovers
+  4,272 molecules that had been lost non-randomly; with them, the scaffold penalty is about 25% larger than the
+  filtered data suggested.
 
 ![Test MAE by representation and split](figures/fig1_representations.png)
 
 Every step, with all tables and figures, is described in **[docs/details.md](docs/details.md)**.
 
 ## Data and methods
-* **Data:** QM9 (Ramakrishnan *et al.*, 2014), 133,885 small organic molecules, in the SDF + CSV version distributed by
-  DeepChem for MoleculeNet (Wu *et al.*, 2018). The gap is converted from Hartree to eV.
-* **Data quality:** 1,688 records that RDKit cannot read and 5,638 records that RDKit reads as radicals (impossible for
-  closed-shell QM9 molecules; a known problem of this SDF file) are excluded and listed, leaving **126,559 molecules**.
-* **Representations:** 190 RDKit 2D descriptors, a Morgan count fingerprint (radius 2, 2,048 bins), and both together.
+* **Data:** QM9 (Ramakrishnan *et al.*, 2014), 133,885 small organic molecules, from the official files on figshare.
+  Molecules are read from their **GDB-17 SMILES**, so every bond is defined (no bond guessing from 3D coordinates).
+  The gap is converted from Hartree to eV.
+* **Data quality:** the 3,054 "uncharacterized" molecules, whose structure changed during the DFT optimization, are
+  excluded (standard practice); all other molecules pass the structure checks, leaving **130,831 molecules**.
+* **Representations:** 188 RDKit 2D descriptors, a Morgan count fingerprint (radius 2, 2,048 bins), and both together.
 * **Splits:** 80 / 10 / 10 % train / validation / test, random and balanced scaffold split, 3 seeds each, saved once and
   used by every experiment.
 * **Model selection:** seven model families (Ridge, k-nearest neighbours, Random Forest, Extra Trees, LightGBM, XGBoost,
   neural network), each with the same budget of 8 hyperparameter settings, compared on the **validation** set. The
   decision rule was fixed in advance: lowest validation MAE on the scaffold split; within 0.01 eV, the fastest model.
   The test set is used only once, for the final scores.
-* **Analyses:** learning curves (1,000 to 101,247 training molecules), error vs. similarity to the training set
+* **Analyses:** learning curves (1,000 to ~104,665 training molecules), error vs. similarity to the training set
   (Tanimoto, nearest neighbour), SHAP values and error analysis by chemical class.
 
 ## How to run
@@ -62,7 +66,7 @@ Every step, with all tables and figures, is described in **[docs/details.md](doc
 2. Open `notebooks/run_on_colab.ipynb` with Google Colab.
 3. Run the cells in order. The first cells mount Drive, install the packages and download QM9
    (into `MyDrive/QM9_Molecular_Property_Prediction/data/raw/`). Results are written to
-   `MyDrive/QM9_Molecular_Property_Prediction/v2/`.
+   `MyDrive/QM9_Molecular_Property_Prediction/v3/`.
 
 **On your own computer** (Python ≥ 3.10)
 ```bash
@@ -71,13 +75,13 @@ cd qm9-gap-generalization
 pip install -r requirements.txt
 python scripts/00_download_data.py
 python scripts/01_prepare_data.py
-# ... then 02 to 07 in order
+# ... then 02 to 08 in order
 ```
 The data go to `data/raw/` and all results to `outputs/` inside the repository. Other folders can be set with the
 environment variables `QM9_RAW_DIR` and `QM9_WORK_DIR`.
 
-**Run time** on a standard Colab CPU runtime (approximate): step 1 ≈ 20 min, step 2 < 1 min, step 3 ≈ 2 h,
-step 4 ≈ 3 h, step 5 ≈ 1.5 h, step 6 ≈ 15 min, step 7 ≈ 15 min. Every step saves its progress, so an interrupted run
+**Run time** on a standard Colab CPU runtime (approximate): step 0 ≈ 5 min, step 1 ≈ 20 min, step 2 < 1 min,
+step 3 ≈ 3 h, step 4 ≈ 5.5 h, step 5 ≈ 2.5 h, step 6 ≈ 15 min, step 7 ≈ 15 min, step 8 ≈ 30 min (about 12 h in total). Every step saves its progress, so an interrupted run
 continues where it stopped.
 
 ### Predict the gap of a new molecule
@@ -85,7 +89,7 @@ After steps 1–4, give one or more SMILES (or a text file with one SMILES per l
 ```bash
 python scripts/08_predict.py "c1ccccc1O" "CC(=O)C"
 ```
-The first run trains the final model (LightGBM on descriptors + Morgan, all 126,559 molecules, about 15 min) and
+The first run trains the final model (LightGBM on descriptors + Morgan, all 130,831 molecules, about 30 min) and
 saves it; later runs only predict. For every molecule the script also prints its similarity to the most similar QM9
 molecule (with that molecule's DFT gap) and a warning if the molecule is unlike QM9 (other elements than C, N, O, F,
 more than 9 heavy atoms, charged or radical), because such predictions are much less reliable.
@@ -116,7 +120,7 @@ figures/                          figures of the final run
 
 ## Limitations and future work
 QM9 contains only small molecules (up to nine heavy atoms) at one level of theory, and only 2D representations were
-tested; the worst errors involve 3D effects (strain, non-planarity) that these representations do not encode. The
+tested; the worst errors involve strain and charge separation, which these representations encode poorly. The
 natural next steps are graph neural networks (e.g. Chemprop) and 3D-aware models on the same splits, and uncertainty
 estimates as a stronger warning signal. See [docs/details.md](docs/details.md#limitations) for the full list.
 

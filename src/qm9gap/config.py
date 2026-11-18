@@ -1,10 +1,10 @@
 """All settings of the project in one place.
 
 Where the data and results go:
-  * on Google Colab (Drive mounted): MyDrive/QM9_Molecular_Property_Prediction/data/raw and .../v2
+  * on Google Colab (Drive mounted): MyDrive/QM9_Molecular_Property_Prediction/data/raw and .../v3
   * on any other computer: data/raw and outputs/ inside this repository
 Both can be changed with two environment variables:
-    QM9_RAW_DIR   folder with qm9.sdf and qm9.sdf.csv
+    QM9_RAW_DIR   folder with the downloaded QM9 files
     QM9_WORK_DIR  folder where this project writes processed data and results
 """
 import os
@@ -14,14 +14,17 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[2]
 _DRIVE = Path("/content/drive/MyDrive/QM9_Molecular_Property_Prediction")
 if _DRIVE.parent.is_dir():  # running on Colab with Google Drive mounted
-    _RAW_DEFAULT, _WORK_DEFAULT = _DRIVE / "data/raw", _DRIVE / "v2"
+    _RAW_DEFAULT, _WORK_DEFAULT = _DRIVE / "data/raw", _DRIVE / "v3"
 else:
     _RAW_DEFAULT, _WORK_DEFAULT = _REPO / "data/raw", _REPO / "outputs"
 RAW_DIR = Path(os.environ.get("QM9_RAW_DIR", _RAW_DEFAULT))
 WORK_DIR = Path(os.environ.get("QM9_WORK_DIR", _WORK_DEFAULT))
 
-SDF = RAW_DIR / "qm9.sdf"
-PROPERTIES_CSV = RAW_DIR / "qm9.sdf.csv"
+# official QM9 files (Ramakrishnan et al. 2014, figshare)
+XYZ_URL = "https://ndownloader.figshare.com/files/3195389"              # dsgdb9nsd.xyz.tar.bz2
+UNCHARACTERIZED_URL = "https://ndownloader.figshare.com/files/3195404"  # uncharacterized.txt
+QM9_TABLE = RAW_DIR / "qm9.csv"                     # made by step 0: index, mol_id, SMILES, homo, lumo, gap
+UNCHARACTERIZED = RAW_DIR / "uncharacterized.txt"   # 3,054 molecules whose structure changed during DFT
 
 PROC_DIR = WORK_DIR / "processed"
 CHUNK_DIR = PROC_DIR / "chunks"
@@ -36,11 +39,11 @@ SPLITS = PROC_DIR / "splits.parquet"            # mol_id + one column per split/
 PREP_REPORT = PROC_DIR / "prepare_report.json"
 
 # ---------------- data quality ----------------
-# All QM9 molecules are neutral closed-shell species. Some records come out of the SDF with unpaired
-# electrons ([CH], [C], [N] in the SMILES), most likely because charges or bond orders are not fully
-# encoded in this SDF file; their RDKit graph - and so every descriptor - does not describe the real
-# molecule. They are excluded and listed in processed/excluded_radicals.csv.
-EXCLUDE_RADICALS = True
+# Molecules are read from their GDB-17 SMILES, in which every bond is defined, instead of guessing the
+# bonds from 3D coordinates (that guess fails for about 5% of QM9). The 3,054 "uncharacterized"
+# molecules, whose structure changed during the DFT geometry optimization, are excluded: their
+# computed gap does not belong to the molecule in the SMILES.
+EXCLUDE_UNCHARACTERIZED = True
 
 # ---------------- physics ----------------
 HARTREE_TO_EV = 27.211386245988  # CODATA 2018
@@ -57,7 +60,7 @@ FRACTIONS = (0.8, 0.1, 0.1)  # train / validation / test
 
 # ---------------- models ----------------
 FOREST_TREES = 300            # trees in Random Forest / Extra Trees
-MAX_BOOSTING_ROUNDS = 5000    # upper limit for LightGBM / XGBoost; early stopping picks the number
+MAX_BOOSTING_ROUNDS = 10_000  # upper limit for LightGBM / XGBoost; early stopping picks the number
 EARLY_STOPPING_ROUNDS = 100
 
 # ---------------- model selection (step 3) ----------------

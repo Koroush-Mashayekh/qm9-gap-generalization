@@ -1,4 +1,4 @@
-"""Everything that needs RDKit: reading the SDF and turning a molecule into features.
+"""Everything that needs RDKit: reading a molecule from its SMILES and turning it into features.
 
 The same functions are used for the QM9 molecules and for any new molecule, so a prediction for a
 new SMILES uses exactly the same descriptors as training. All features are computed on the
@@ -17,27 +17,6 @@ DESCRIPTOR_NAMES = [name for name, _ in Descriptors.descList]
 _MORGAN = rdFingerprintGenerator.GetMorganGenerator(radius=config.MORGAN_RADIUS,
                                                      fpSize=config.MORGAN_SIZE)
 _FLOAT32_MAX = np.finfo(np.float32).max
-
-
-def clean_id(raw):
-    """'gdb 1<TAB>157.71 ...' -> 'gdb_1'. The SDF title line carries extra numbers after a tab."""
-    return str(raw).split("\t")[0].strip().replace(" ", "_")
-
-
-def open_sdf(path=config.SDF):
-    """Random-access reader: supplier[i] returns record i (or None if RDKit cannot parse it)."""
-    return Chem.SDMolSupplier(str(path), sanitize=False, removeHs=False)
-
-
-def prepare_mol(raw_mol):
-    """Sanitize and remove explicit hydrogens. Returns None if RDKit rejects the molecule."""
-    if raw_mol is None:
-        return None
-    try:
-        Chem.SanitizeMol(raw_mol)
-        return Chem.RemoveHs(raw_mol)
-    except Exception:
-        return None
 
 
 def scaffold_of(mol):
@@ -70,12 +49,6 @@ def smiles_of(mol):
     return Chem.MolToSmiles(mol)
 
 
-def count_radical_electrons(smiles):
-    """Unpaired electrons of the molecule written in `smiles` (0 for a normal closed-shell molecule)."""
-    mol = Chem.MolFromSmiles(smiles)
-    return -1 if mol is None else sum(a.GetNumRadicalElectrons() for a in mol.GetAtoms())
-
-
 # Structural classes used to analyse where the model makes errors (step 7). A molecule can belong
 # to several classes. SMARTS patterns are matched on the heavy-atom graph.
 _SMARTS = {
@@ -88,12 +61,17 @@ _SMARTS = {
     "contains N": "[#7]",
     "contains O": "[#8]",
     "contains F": "[F]",
+    # added after the first error analysis (step 7)
+    "charge-separated (+/-)": "[+].[-]",      # neutral overall, with a + and a - charge (e.g. zwitterions)
+    "fused cyclopropane": "[r3;R2]@[r3;R2]",  # a cyclopropane bond shared with another ring
+    "acyclic C=C": "[C;!R]=[C;!R]",           # a C=C double bond outside rings
 }
 _SMARTS = {name: Chem.MolFromSmarts(s) for name, s in _SMARTS.items()}
 _MULTIPLE_BOND_OR_AROMATIC = Chem.MolFromSmarts("[$(*=*),$(*#*),a]")
 STRUCTURAL_CLASSES = ("acyclic", "aromatic ring", "3-membered ring", "4-membered ring", "3 or more rings",
                       "fully saturated", "C=O (carbonyl)", "C#N (nitrile)", "C#C (alkyne)", "C=C (alkene)",
-                      "contains N", "contains O", "contains F")
+                      "contains N", "contains O", "contains F",
+                      "charge-separated (+/-)", "fused cyclopropane", "acyclic C=C")
 
 
 def structural_classes(smiles):
@@ -124,6 +102,18 @@ def mol_from_smiles(smiles):
     if mol is None:
         raise ValueError(f"Invalid SMILES: {smiles}")
     return mol
+
+
+def structure_problem(mol):
+    """Why a QM9 molecule cannot be used ("" = no problem). QM9 molecules are single, neutral,
+    closed-shell molecules, so anything else means the structure was not read correctly."""
+    if any(atom.GetNumRadicalElectrons() for atom in mol.GetAtoms()):
+        return "radical"
+    if len(Chem.GetMolFrags(mol)) > 1:
+        return "several pieces"
+    if Chem.GetFormalCharge(mol) != 0:
+        return "net charge"
+    return ""
 
 
 def outside_qm9(mol):
